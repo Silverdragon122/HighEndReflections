@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High Quality Reflection Demo</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+        #container { position: relative; }
+        #controls { position: absolute; top: 10px; left: 10px; background: white; padding: 10px; border: 1px solid black; }
+        #modal {
+            display: block;
+            position: fixed;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgb(0,0,0);
+            background-color: rgba(0,0,0,0.4);
+            padding-top: 60px;
+        }
+        #modalContent {
+            background-color: #fefefe;
+            margin: 5% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+        }
+        #closeModal {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        #closeModal:hover,
+        #closeModal:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="controls">
+            <label for="lightColor">Light Color:</label>
+            <input type="color" id="lightColor" name="lightColor" value="#ffffff"><br><br>
+            <label for="lightIntensity">Light Intensity:</label>
+            <input type="range" id="lightIntensity" name="lightIntensity" min="0" max="10" step="0.1" value="2">
+        </div>
+    </div>
+    <div id="modal">
+        <div id="modalContent">
+            <span id="closeModal">&times;</span>
+            <p>Welcome to this high quality reflection demo!</p>
+            <p>You can see how reflections work and how light sources can affect them</p>
+            <p>Click Anywhere outside of this modal to see for yourself!</p>
+        </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let container, camera, scene, renderer;
+        let sphere, pointLight;
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        let envMap;
+
+        init();
+        animate();
+
+        function init() {
+            container = document.getElementById('container');
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 5;
+
+            // Scene
+            scene = new THREE.Scene();
+
+            // Load environment map
+            const loader = new THREE.CubeTextureLoader();
+            envMap = loader.load([
+                'https://threejs.org/examples/textures/cube/Bridge2/posx.jpg',
+                'https://threejs.org/examples/textures/cube/Bridge2/negx.jpg',
+                'https://threejs.org/examples/textures/cube/Bridge2/posy.jpg',
+                'https://threejs.org/examples/textures/cube/Bridge2/negy.jpg',
+                'https://threejs.org/examples/textures/cube/Bridge2/posz.jpg',
+                'https://threejs.org/examples/textures/cube/Bridge2/negz.jpg'
+            ]);
+            envMap.encoding = THREE.sRGBEncoding;
+            scene.background = envMap;
+
+            // Sphere
+            const sphereGeometry = new THREE.SphereGeometry(1, 64, 64);
+            const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0x0077ff, roughness: 0.1, metalness: 0.9 });
+            sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+            sphere.castShadow = true;
+            sphere.receiveShadow = true;
+            scene.add(sphere);
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            scene.add(ambientLight);
+
+            pointLight = new THREE.PointLight(0xffffff, 2, 100);
+            pointLight.position.set(5, 5, 5);
+            pointLight.castShadow = true;
+            pointLight.shadow.mapSize.width = 2048; // High quality shadow map
+            pointLight.shadow.mapSize.height = 2048; // High quality shadow map
+            scene.add(pointLight);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.outputEncoding = THREE.sRGBEncoding;
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap; // High quality shadow
+            container.appendChild(renderer.domElement);
+
+            // Mouse events for rotation
+            container.addEventListener('mousedown', onMouseDown, false);
+            container.addEventListener('mousemove', onMouseMove, false);
+            container.addEventListener('mouseup', onMouseUp, false);
+            container.addEventListener('mouseleave', onMouseUp, false);
+
+            // Prevent dragging when interacting with controls
+            document.getElementById('controls').addEventListener('mousedown', (event) => {
+                event.stopPropagation();
+            });
+            document.getElementById('controls').addEventListener('mousemove', (event) => {
+                event.stopPropagation();
+            });
+            document.getElementById('controls').addEventListener('mouseup', (event) => {
+                event.stopPropagation();
+            });
+
+            // Light controls
+            document.getElementById('lightColor').addEventListener('input', (event) => {
+                pointLight.color.set(event.target.value);
+            });
+
+            document.getElementById('lightIntensity').addEventListener('input', (event) => {
+                pointLight.intensity = event.target.value;
+            });
+
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Apply raytracing effects by default
+            applyRaytracing();
+
+            // Modal functionality
+            const modal = document.getElementById('modal');
+            const closeModal = document.getElementById('closeModal');
+            closeModal.onclick = function() {
+                modal.style.display = 'none';
+            };
+            window.onclick = function(event) {
+                if (event.target == modal) {
+                    modal.style.display = 'none';
+                }
+            };
+        }
+
+        function onMouseDown(event) {
+            isDragging = true;
+            previousMousePosition = {
+                x: event.clientX,
+                y: event.clientY
+            };
+        }
+
+        function onMouseMove(event) {
+            if (isDragging) {
+                const deltaMove = {
+                    x: event.clientX - previousMousePosition.x
+                };
+
+                const rotationAngle = toRadians(deltaMove.x * 0.5);
+                const spherePosition = sphere.position.clone();
+                const cameraPosition = camera.position.clone();
+
+                // Rotate camera around the sphere's center
+                camera.position.x = Math.cos(rotationAngle) * (cameraPosition.x - spherePosition.x) - Math.sin(rotationAngle) * (cameraPosition.z - spherePosition.z) + spherePosition.x;
+                camera.position.z = Math.sin(rotationAngle) * (cameraPosition.x - spherePosition.x) + Math.cos(rotationAngle) * (cameraPosition.z - spherePosition.z) + spherePosition.z;
+
+                camera.lookAt(sphere.position);
+
+                previousMousePosition = {
+                    x: event.clientX,
+                    y: event.clientY
+                };
+            }
+        }
+
+        function onMouseUp() {
+            isDragging = false;
+        }
+
+        function toRadians(angle) {
+            return angle * (Math.PI / 180);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+
+        function applyRaytracing() {
+            // Apply environment map for reflections and GI
+            sphere.material.envMap = envMap;
+            sphere.material.envMapIntensity = 1.0;
+            sphere.material.needsUpdate = true;
+        }
+    </script>
+</body>
+</html>
